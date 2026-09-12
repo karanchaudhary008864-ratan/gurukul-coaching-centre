@@ -8,7 +8,38 @@ async function loadCourses(){const cs=await api("/api/courses");$("#courseGrid")
 async function course(id){const c=await api("/api/courses/"+id);modal(`<span class="eyebrow">${esc(c.category)}</span><h2>${esc(c.title)}</h2><p>${esc(c.description)}</p><h3>What you get</h3><ul>${c.lessons.map(l=>`<li>${esc(l.title)}</li>`).join("")||"<li>Content coming soon</li>"}</ul><button class="btn full" onclick="enroll(${c.id})">${c.price?"Enroll / Continue":"Enroll Free"}</button>`)}
 async function enroll(id){if(!token){loginModal();return}try{const d=await api("/api/enroll/"+id,{method:"POST"});alert(d.message);if(d.payment_status==="pending") alert("For live payments, configure Razorpay in .env. This demo does not fake a successful payment.");closeModal();}catch(e){alert(e.message)}}
 async function loadNotices(){const n=await api("/api/notices");$("#noticesList").innerHTML=n.map(x=>`<div class="notice"><b>${esc(x.title)}</b><p>${esc(x.body)}</p></div>`).join("")}
-async function refresh(){try{me=await api("/api/me");$("#loginBtn").textContent=me.name.split(" ")[0]+" • Dashboard";$("#loginBtn").onclick=dashboard}catch(e){me=null;$("#loginBtn").textContent="Login";$("#loginBtn").onclick=loginModal}}
+async function refresh(){try{me=await api("/api/me");$("#loginBtn").textContent=me.name.split(" ")[0]+" • Dashboard";$("#loginBtn").onclick=dashboard}else{$("#loginBtn").onclick=loginModal}}
+async function openHub(mode){
+  if(!token){loginModal();return}
+  try{
+    const d=await api("/api/student/dashboard");
+    if(!d.courses.length){
+      modal(`<h2>${mode==="live"?"Live Classes":mode==="notes"?"Notes & PDFs":"Mock Tests"}</h2><p>Please enroll in a course first. Then your learning content will appear here.</p><button class="btn full" onclick="closeModal();document.querySelector('#courses').scrollIntoView({behavior:'smooth'})">Explore Courses</button>`);
+      return;
+    }
+    let html=`<h2>${mode==="live"?"Live Classes":mode==="notes"?"Notes & PDFs":"Mock Tests"}</h2>`;
+    let found=false;
+    for(const enrolled of d.courses){
+      const c=await api("/api/student/course/"+enrolled.id);
+      html+=`<h3>${esc(c.title)}</h3>`;
+      if(mode==="tests"){
+        if(c.tests.length){
+          found=true;
+          html+=c.tests.map(t=>`<button class="btn" onclick="takeTest(${t.id})">${esc(t.title)} (${t.duration_minutes} min)</button>`).join(" ");
+        }else html+=`<p>No tests available yet.</p>`;
+      }else{
+        const lessons=c.lessons.filter(l=>mode==="live"?l.video_url:l.notes_url);
+        if(lessons.length){
+          found=true;
+          html+=lessons.map(l=>`<article class="lesson"><h4>${esc(l.title)}</h4>${mode==="live"?`<a class="btn full" href="${esc(l.video_url)}" target="_blank" rel="noopener">Join Live Class</a>`:`<a class="btn ghost" href="${esc(l.notes_url)}" target="_blank" rel="noopener">Open Notes / PDF</a>`}</article>`).join("");
+        }else html+=`<p>No ${mode==="live"?"live classes":"notes/PDFs"} have been added to this course yet.</p>`;
+      }
+    }
+    if(!found) html+=`<div class="noticeBox">Content will appear here when it is added to your enrolled course.</div>`;
+    modal(html);
+  }catch(e){alert(e.message)}
+}
+
 async function dashboard(){const d=await api("/api/student/dashboard");modal(`<div class="dash"><h2>Welcome, ${esc(me.name)}</h2><div class="dashgrid">${d.courses.map(c=>`<div class="card"><h3>${esc(c.title)}</h3><span class="tag">${esc(c.payment_status)}</span><button class="btn full" onclick="openLearning(${c.id})">My Course</button></div>`).join("")||"<p>No enrolled courses yet.</p>"}</div><h3>Results</h3>${d.results.map(r=>`<div class="notice">${esc(r.title)} — <b>${r.score}/${r.total}</b></div>`).join("")||"<p>No test attempts yet.</p>"}<button class="btn ghost" onclick="logout()">Logout</button></div>`)}
 async function openLearning(id){try{const c=await api("/api/student/course/"+id);modal(`<h2>${esc(c.title)}</h2><div>${c.lessons.map(l=>`<article class="lesson"><h3>${esc(l.title)}</h3>${l.video_url?`<div class="video"><iframe src="${esc(l.video_url)}" allowfullscreen></iframe></div>`:""}${l.notes_url?`<a class="btn ghost" href="${esc(l.notes_url)}" target="_blank">Open Notes / PDF</a>`:""}</article>`).join("")}</div><h3>Tests</h3>${c.tests.map(t=>`<button class="btn" onclick="takeTest(${t.id})">${esc(t.title)} (${t.duration_minutes} min)</button>`).join(" ")||"<p>No tests yet.</p>"}`)}catch(e){alert(e.message)}}
 async function takeTest(id){try{const t=await api("/api/tests/"+id);modal(`<h2>${esc(t.title)}</h2><form id="testForm" class="testform">${t.questions.map((q,i)=>`<fieldset><legend>${i+1}. ${esc(q.question)}</legend>${["A","B","C","D"].map(k=>`<label><input type="radio" name="q${q.id}" value="${k}"> ${esc(q["option_"+k.toLowerCase()])}</label>`).join("")}</fieldset>`).join("")}<button class="btn">Submit Test</button></form>`);$("#testForm").onsubmit=async e=>{e.preventDefault();const answers={};new FormData(e.target).forEach((v,k)=>answers[k.slice(1)]=v);try{const r=await api("/api/tests/"+id+"/submit",{method:"POST",body:{answers}});modal(`<h2>Result</h2><div class="result">${r.score} / ${r.total}<small>${r.percentage}%</small></div><button class="btn" onclick="dashboard()">Back to Dashboard</button>`)}catch(x){alert(x.message)}}}catch(e){alert(e.message)}}
